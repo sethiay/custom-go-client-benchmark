@@ -5,15 +5,16 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"cloud.google.com/go/storage"
 	"github.com/googleapis/gax-go/v2"
@@ -31,28 +32,25 @@ var (
 	MaxConnsPerHost     = 100
 	MaxIdleConnsPerHost = 100
 
-	MB = 1024 * 1024
+	MB = int64(1024 * 1024)
 
 	NumOfWorker = flag.Int("worker", 48, "Number of concurrent worker to read")
 
-	NumOfReadCallPerWorker = flag.Int("read-call-per-worker", 1000000, "Number of read call per worker")
+	ReadSizePerWorker = flag.Int64("read-size-per-worker", 50*MB, "Size of read call per worker")
 
 	MaxRetryDuration = 30 * time.Second
 
 	RetryMultiplier = 2.0
 
-	BucketName = flag.String("bucket", "princer-working-dirs", "GCS bucket name.")
+	BucketName = flag.String("bucket", "ayushsethi-parallel-downloads", "GCS bucket name.")
 
 	ProjectName = flag.String("project", "gcs-fuse-test", "GCP project name.")
 
 	clientProtocol = flag.String("client-protocol", "http", "Network protocol.")
 
-	// ObjectNamePrefix<worker_id>ObjectNameSuffix is the object name format.
-	// Here, worker id goes from <0 to NumberOfWorker>.
-	ObjectNamePrefix = "princer_100M_files/file_"
-	ObjectNameSuffix = ""
+	ObjectName = "cp/100mb/fio/Workload.0/0"
 
-	tracerName      = "princer-storage-benchmark"
+	tracerName      = "ayushsethi-storage-benchmark"
 	enableTracing   = flag.Bool("enable-tracing", false, "Enable tracing with Cloud Trace export")
 	traceSampleRate = flag.Float64("trace-sample-rate", 1.0, "Sampling rate for Cloud Trace")
 
@@ -116,37 +114,35 @@ func CreateGrpcClient(ctx context.Context) (client *storage.Client, err error) {
 	return
 }
 
-func ReadObject(ctx context.Context, workerId int, bucketHandle *storage.BucketHandle) (err error) {
+func RangeReadObject(ctx context.Context, workerId int, bucketHandle *storage.BucketHandle, rangeStart int64, rangeEnd int64) (err error) {
 
-	objectName := ObjectNamePrefix + strconv.Itoa(workerId) + ObjectNameSuffix
+	objectName := ObjectName
 
-	for i := 0; i < *NumOfReadCallPerWorker; i++ {
-		var span trace.Span
-		traceCtx, span := otel.GetTracerProvider().Tracer(tracerName).Start(ctx, "ReadObject")
-		span.SetAttributes(
-			attribute.KeyValue{"bucket", attribute.StringValue(*BucketName)},
-		)
-		start := time.Now()
-		object := bucketHandle.Object(objectName)
-		rc, err := object.NewReader(traceCtx)
-		if err != nil {
-			return fmt.Errorf("while creating reader object: %v", err)
-		}
+	var span trace.Span
+	traceCtx, span := otel.GetTracerProvider().Tracer(tracerName).Start(ctx, "RangeReadObject")
+	span.SetAttributes(
+		attribute.KeyValue{"bucket", attribute.StringValue(*BucketName)},
+	)
+	start := time.Now()
+	object := bucketHandle.Object(objectName)
+	rc, err := object.NewRangeReader(traceCtx, rangeStart, rangeEnd-rangeStart)
+	if err != nil {
+		return fmt.Errorf("while creating reader object: %v", err)
+	}
 
-		// Calls Reader.WriteTo implicitly.
-		_, err = io.Copy(io.Discard, rc)
-		if err != nil {
-			return fmt.Errorf("while reading and discarding content: %v", err)
-		}
+	// Calls Reader.WriteTo implicitly.
+	_, err = io.Copy(io.Discard, rc)
+	if err != nil {
+		return fmt.Errorf("while reading and discarding content: %v", err)
+	}
 
-		duration := time.Since(start)
-		stats.Record(ctx, readLatency.M(float64(duration.Milliseconds())))
+	duration := time.Since(start)
+	stats.Record(ctx, readLatency.M(float64(duration.Milliseconds())))
 
-		err = rc.Close()
-		span.End()
-		if err != nil {
-			return fmt.Errorf("while closing the reader object: %v", err)
-		}
+	err = rc.Close()
+	span.End()
+	if err != nil {
+		return fmt.Errorf("while closing the reader object: %v", err)
 	}
 
 	return
@@ -193,25 +189,39 @@ func main() {
 	}
 	defer closeSDExporter()
 
-	// Run the actual workload
-	for i := 0; i < *NumOfWorker; i++ {
-		idx := i
-		eG.Go(func() error {
-			err = ReadObject(ctx, idx, bucketHandle)
-			if err != nil {
-				err = fmt.Errorf("while reading object %v: %w", ObjectNamePrefix+strconv.Itoa(idx), err)
-				return err
-			}
-			return err
-		})
-	}
-
-	err = eG.Wait()
-
-	if err == nil {
-		fmt.Println("Read benchmark completed successfully!")
-	} else {
-		fmt.Fprintf(os.Stderr, "Error while running benchmark: %v", err)
+	objectStat, err := bucketHandle.Object(ObjectName).Attrs(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "while getting stat of object: %v", err)
 		os.Exit(1)
 	}
+
+	var objectLenRead int64
+	for objectLenRead < objectStat.Size {
+		// Run the actual workload
+		for i := 0; i < *NumOfWorker; i++ {
+			var start int64 = objectLenRead + int64(i)**ReadSizePerWorker
+			var end int64 = min(start+*ReadSizePerWorker, objectStat.Size)
+			if start == end {
+				break
+			}
+			idx := i
+			eG.Go(func() error {
+				err = RangeReadObject(ctx, idx, bucketHandle, start, end)
+				if err != nil {
+					err = fmt.Errorf("while reading object %v: %w", ObjectName+strconv.Itoa(idx), err)
+					return err
+				}
+				return err
+			})
+		}
+		err = eG.Wait()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error while running benchmark: %v", err)
+			os.Exit(1)
+		}
+		objectLenRead = min(objectLenRead+int64(*NumOfWorker)**ReadSizePerWorker, objectStat.Size)
+	}
+	fmt.Println("Read benchmark completed successfully!")
+
 }
+
