@@ -34,7 +34,7 @@ var (
 
 	MB = int64(1024 * 1024)
 
-	NumOfWorker = flag.Int("worker", 48, "Number of concurrent worker to read")
+	NumOfWorker = flag.Int("worker", 96, "Number of concurrent worker to read")
 
 	ReadSizePerWorker = flag.Int64("read-size-per-worker", 50*MB, "Size of read call per worker")
 
@@ -48,7 +48,7 @@ var (
 
 	clientProtocol = flag.String("client-protocol", "http", "Network protocol.")
 
-	ObjectName = "cp/100mb/fio/Workload.0/0"
+	ObjectName = "1000G/fio/Workload.0/0"
 
 	tracerName      = "ayushsethi-storage-benchmark"
 	enableTracing   = flag.Bool("enable-tracing", false, "Enable tracing with Cloud Trace export")
@@ -224,4 +224,3 @@ func main() {
 	fmt.Println("Read benchmark completed successfully!")
 
 }
-
