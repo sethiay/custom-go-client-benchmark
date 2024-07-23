@@ -195,6 +195,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	startTime := time.Now()
 	var objectLenRead int64
 	for objectLenRead < objectStat.Size {
 		// Run the actual workload
@@ -221,6 +222,6 @@ func main() {
 		}
 		objectLenRead = min(objectLenRead+int64(*NumOfWorker)**ReadSizePerWorker, objectStat.Size)
 	}
-	fmt.Println("Read benchmark completed successfully!")
-
+	duration := time.Since(startTime)
+	fmt.Println(fmt.Sprintf("Read benchmark completed successfully in %v", duration.Seconds()))
 }
