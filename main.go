@@ -34,9 +34,8 @@ var (
 
 	MB = int64(1024 * 1024)
 
-	NumOfWorker = flag.Int("worker", 96, "Number of concurrent worker to read")
-
-	ReadSizePerWorker = flag.Int64("read-size-per-worker", 50*MB, "Size of read call per worker")
+	NumOfWorker         = flag.Int("worker", 96, "Number of concurrent worker to read")
+	NumOfReadsPerWorker = flag.Int("num-reads-per-worker", 200, "Number of times each worker should read its assigned file")
 
 	MaxRetryDuration = 30 * time.Second
 
@@ -48,7 +47,8 @@ var (
 
 	clientProtocol = flag.String("client-protocol", "http", "Network protocol.")
 
-	ObjectName = "1000G/fio/Workload.0/0"
+	// cp/100mb/fio/ directory contains 100 100MiB files named like Workload.0/0... Workload.100/100
+	ObjectName = "cp/100mb/fio/Workload."
 
 	tracerName      = "ayushsethi-storage-benchmark"
 	enableTracing   = flag.Bool("enable-tracing", false, "Enable tracing with Cloud Trace export")
@@ -196,18 +196,13 @@ func main() {
 	}
 
 	startTime := time.Now()
-	var objectLenRead int64
-	for objectLenRead < objectStat.Size {
+	var objectReads int
+	for objectReads < *NumOfReadsPerWorker {
 		// Run the actual workload
 		for i := 0; i < *NumOfWorker; i++ {
-			var start int64 = objectLenRead + int64(i)**ReadSizePerWorker
-			var end int64 = min(start+*ReadSizePerWorker, objectStat.Size)
-			if start == end {
-				break
-			}
 			idx := i
 			eG.Go(func() error {
-				err = RangeReadObject(ctx, idx, bucketHandle, start, end)
+				err = RangeReadObject(ctx, idx, bucketHandle, 0, objectStat.Size)
 				if err != nil {
 					err = fmt.Errorf("while reading object %v: %w", ObjectName+strconv.Itoa(idx), err)
 					return err
@@ -220,7 +215,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error while running benchmark: %v", err)
 			os.Exit(1)
 		}
-		objectLenRead = min(objectLenRead+int64(*NumOfWorker)**ReadSizePerWorker, objectStat.Size)
+		objectReads = objectReads + 1
 	}
 	duration := time.Since(startTime)
 	fmt.Println(fmt.Sprintf("Read benchmark completed successfully in %v", duration.Seconds()))
