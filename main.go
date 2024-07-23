@@ -116,7 +116,7 @@ func CreateGrpcClient(ctx context.Context) (client *storage.Client, err error) {
 
 func RangeReadObject(ctx context.Context, workerId int, bucketHandle *storage.BucketHandle, rangeStart int64, rangeEnd int64) (err error) {
 
-	objectName := ObjectName
+	objectName := ObjectName + fmt.Sprintf("%v/%v", workerId, workerId)
 
 	var span trace.Span
 	traceCtx, span := otel.GetTracerProvider().Tracer(tracerName).Start(ctx, "RangeReadObject")
@@ -189,7 +189,7 @@ func main() {
 	}
 	defer closeSDExporter()
 
-	objectStat, err := bucketHandle.Object(ObjectName).Attrs(ctx)
+	objectStat, err := bucketHandle.Object(ObjectName + "0/0").Attrs(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "while getting stat of object: %v", err)
 		os.Exit(1)
