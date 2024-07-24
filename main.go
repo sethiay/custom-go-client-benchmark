@@ -245,5 +245,5 @@ func main() {
 	duration := time.Since(startTime)
 	fmt.Println(fmt.Sprintf("Read benchmark completed successfully in %v", duration.Seconds()))
 	fmt.Println(fmt.Sprintf("The total read latencies across all goroutines is %v and total waiting times across all goroutines is %v",
-		time.Duration(totalReadTimeByAllWorkers).Microseconds(), time.Duration(totalWaitingTimeByAllWorkers).Microseconds()))
+		totalReadTimeByAllWorkers, totalWaitingTimeByAllWorkers))
 }
