@@ -199,6 +199,7 @@ func main() {
 	startTime := time.Now()
 	var objectLenRead int64
 	var totalWaitingTimeByAllWorkers, totalReadTimeByAllWorkers int64
+	var computationTime int64
 	for objectLenRead < objectStat.Size {
 		// Run the actual workload
 		var i int
@@ -230,8 +231,8 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error while running benchmark: %v", err)
 			os.Exit(1)
 		}
+		computeStartTime := time.Now()
 		objectLenRead = min(objectLenRead+int64(*NumOfWorker)**ReadSizePerWorker, objectStat.Size)
-
 		var minLatency, maxLatency, totalReadLatency int64 = math.MaxInt64, math.MinInt64, 0
 		for j := 0; j < i; j++ {
 			readLat := readLatencies[j]
@@ -241,9 +242,10 @@ func main() {
 		}
 		totalWaitingTimeByAllWorkers = totalWaitingTimeByAllWorkers + int64(i)*maxLatency - totalReadLatency
 		totalReadTimeByAllWorkers = totalReadTimeByAllWorkers + totalReadLatency
+		computationTime = computationTime + time.Since(computeStartTime).Microseconds()
 	}
 	duration := time.Since(startTime)
-	fmt.Println(fmt.Sprintf("Read benchmark completed successfully in %v", duration.Seconds()))
+	fmt.Println(fmt.Sprintf("Read benchmark completed successfully in %v", duration.Seconds()-float64(computationTime/1000000)))
 	fmt.Println(fmt.Sprintf("The total read latencies across all goroutines is %v and total waiting times across all goroutines is %v",
 		totalReadTimeByAllWorkers, totalWaitingTimeByAllWorkers))
 }
