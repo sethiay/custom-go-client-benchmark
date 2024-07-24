@@ -196,26 +196,23 @@ func main() {
 	}
 
 	startTime := time.Now()
-	var objectReads int
-	for objectReads < *NumOfReadsPerWorker {
-		// Run the actual workload
-		for i := 0; i < *NumOfWorker; i++ {
-			idx := i
-			eG.Go(func() error {
+	for i := 0; i < *NumOfWorker; i++ {
+		idx := i
+		eG.Go(func() error {
+			for cnt := 0; cnt < *NumOfReadsPerWorker; cnt++ {
 				err = RangeReadObject(ctx, idx, bucketHandle, 0, objectStat.Size)
 				if err != nil {
 					err = fmt.Errorf("while reading object %v: %w", ObjectName+strconv.Itoa(idx), err)
 					return err
 				}
-				return err
-			})
-		}
-		err = eG.Wait()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while running benchmark: %v", err)
-			os.Exit(1)
-		}
-		objectReads = objectReads + 1
+			}
+			return nil
+		})
+	}
+	err = eG.Wait()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error while running benchmark: %v", err)
+		os.Exit(1)
 	}
 	duration := time.Since(startTime)
 	fmt.Println(fmt.Sprintf("Read benchmark completed successfully in %v", duration.Seconds()))
