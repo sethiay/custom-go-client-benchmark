@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -196,31 +197,28 @@ func main() {
 	}
 
 	startTime := time.Now()
-	var objectLenRead int64
-	for objectLenRead < objectStat.Size {
-		// Run the actual workload
-		for i := 0; i < *NumOfWorker; i++ {
-			var start int64 = objectLenRead + int64(i)**ReadSizePerWorker
-			var end int64 = min(start+*ReadSizePerWorker, objectStat.Size)
-			if start == end {
-				break
-			}
-			idx := i
-			eG.Go(func() error {
-				err = RangeReadObject(ctx, idx, bucketHandle, start, end)
+	totalReadSizePerWorker := int64(math.Ceil(float64(objectStat.Size / int64(*NumOfWorker))))
+	for i := 0; i < *NumOfWorker; i++ {
+		var start int64 = int64(i) * totalReadSizePerWorker
+		var end int64 = min(start+totalReadSizePerWorker, objectStat.Size)
+		idx := i
+		eG.Go(func() error {
+			for start < end {
+				rangeEnd := min(start+*ReadSizePerWorker, end)
+				err = RangeReadObject(ctx, idx, bucketHandle, start, rangeEnd)
 				if err != nil {
 					err = fmt.Errorf("while reading object %v: %w", ObjectName+strconv.Itoa(idx), err)
 					return err
 				}
-				return err
-			})
-		}
-		err = eG.Wait()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while running benchmark: %v", err)
-			os.Exit(1)
-		}
-		objectLenRead = min(objectLenRead+int64(*NumOfWorker)**ReadSizePerWorker, objectStat.Size)
+				start = rangeEnd
+			}
+			return err
+		})
+	}
+	err = eG.Wait()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error while running benchmark: %v", err)
+		os.Exit(1)
 	}
 	duration := time.Since(startTime)
 	fmt.Println(fmt.Sprintf("Read benchmark completed successfully in %v", duration.Seconds()))
