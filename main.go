@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -197,9 +198,12 @@ func main() {
 
 	startTime := time.Now()
 	var objectLenRead int64
+	var totalWaitingTimeByAllWorkers, totalReadTimeByAllWorkers int64
 	for objectLenRead < objectStat.Size {
 		// Run the actual workload
-		for i := 0; i < *NumOfWorker; i++ {
+		var i int
+		readLatencies := make([]int64, int64(*NumOfWorker))
+		for i = 0; i < *NumOfWorker; i++ {
 			var start int64 = objectLenRead + int64(i)**ReadSizePerWorker
 			var end int64 = min(start+*ReadSizePerWorker, objectStat.Size)
 			if start == end {
@@ -207,6 +211,12 @@ func main() {
 			}
 			idx := i
 			eG.Go(func() error {
+				// record latencies
+				readStartTime := time.Now()
+				defer func() {
+					readLatencies[idx] = time.Since(readStartTime).Microseconds()
+				}()
+
 				err = RangeReadObject(ctx, idx, bucketHandle, start, end)
 				if err != nil {
 					err = fmt.Errorf("while reading object %v: %w", ObjectName+strconv.Itoa(idx), err)
@@ -221,7 +231,19 @@ func main() {
 			os.Exit(1)
 		}
 		objectLenRead = min(objectLenRead+int64(*NumOfWorker)**ReadSizePerWorker, objectStat.Size)
+
+		var minLatency, maxLatency, totalReadLatency int64 = math.MaxInt64, math.MinInt64, 0
+		for j := 0; j < i; j++ {
+			readLat := readLatencies[j]
+			minLatency = min(minLatency, readLat)
+			maxLatency = max(maxLatency, readLat)
+			totalReadLatency = totalReadLatency + readLat
+		}
+		totalWaitingTimeByAllWorkers = totalWaitingTimeByAllWorkers + int64(i)*maxLatency - totalReadLatency
+		totalReadTimeByAllWorkers = totalReadTimeByAllWorkers + totalReadLatency
 	}
 	duration := time.Since(startTime)
 	fmt.Println(fmt.Sprintf("Read benchmark completed successfully in %v", duration.Seconds()))
+	fmt.Println(fmt.Sprintf("The total read latencies across all goroutines is %v and total waiting times across all goroutines is %v",
+		time.Duration(totalReadTimeByAllWorkers).Microseconds(), time.Duration(totalWaitingTimeByAllWorkers).Microseconds()))
 }
