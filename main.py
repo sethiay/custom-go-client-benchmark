@@ -1,43 +1,55 @@
-def download_chunks_concurrently(
-    bucket_name, blob_name, filename, chunk_size=32 * 1024 * 1024, workers=8
-):
-  """Download a single file in chunks, concurrently in a process pool."""
-
-  # The ID of your GCS bucket
-  # bucket_name = "your-bucket-name"
-
-  # The file to be downloaded
-  # blob_name = "target-file"
-
-  # The destination filename or path
-  # filename = ""
-
-  # The size of each chunk. The performance impact of this value depends on
-  # the use case. The remote service has a minimum of 5 MiB and a maximum of
-  # 5 GiB.
-  # chunk_size = 32 * 1024 * 1024 (32 MiB)
-
-  # The maximum number of processes to use for the operation. The performance
-  # impact of this value depends on the use case, but smaller files usually
-  # benefit from a higher number of processes. Each additional process occupies
-  # some CPU and memory resources until finished. Threads can be used instead
-  # of processes by passing `worker_type=transfer_manager.THREAD`.
-  # workers=8
-
-  from google.cloud.storage import Client, transfer_manager
-
-  storage_client = Client()
-  bucket = storage_client.bucket(bucket_name)
-  blob = bucket.blob(blob_name)
-
-  transfer_manager.download_chunks_concurrently(
-      blob, filename, chunk_size=chunk_size, max_workers=workers
-  )
-
-  print("Downloaded {} to {}.".format(blob_name, filename))
-
+from google.cloud import storage
+import threading
 import time
-start = time.time()
-download_chunks_concurrently("ayushsethi-parallel-downloads", "1000G/fio/Workload.0/0", "/dev/null", chunk_size=50*1024*1024, workers=96)
-end = time.time()
-print("Time taken: ", end - start)
+
+
+"""
+ Change the constants here before running the script
+"""
+BUCKET_NAME = "ayushsethi-parallel-downloads"
+NUM_WORKERS = 96
+OBJECT_NAME_PREFIX = "cp/100mb/fio/Workload.{0}/0"
+NUM_TIMES_PER_WORKER = 100
+
+storage_client = storage.Client()
+
+bucket = storage_client.bucket(BUCKET_NAME)
+
+def download_blob(source_blob_name, destination_file_name):
+  """Downloads a blob from the bucket."""
+
+
+  # Construct a client side representation of a blob.
+  # Note `Bucket.blob` differs from `Bucket.get_blob` as it doesn't retrieve
+  # any content from Google Cloud Storage. As we don't need additional data,
+  # using `Bucket.blob` is preferred here.
+  blob = bucket.blob(source_blob_name)
+  blob.download_to_filename(destination_file_name)
+
+def task(source_blob_name, num_times):
+  for _ in range(num_times):
+    download_blob(source_blob_name, "/dev/null")
+
+def main():
+  # Spawn threads that will run task of load test.
+  threads = []
+  for thread_num in range(NUM_WORKERS):
+    threads.append(
+        threading.Thread(
+            target=task,
+            args=(OBJECT_NAME_PREFIX.format(thread_num), NUM_TIMES_PER_WORKER)))
+
+  startTime = time.time()
+  for thread in threads:
+    # Thread is kept as daemon, so that it is killed when the parent process
+    # is killed.
+    thread.daemon = True
+    thread.start()
+
+  for thread in threads:
+    thread.join()
+
+  print("Time taken: ", time.time() - startTime)
+
+main()
+
