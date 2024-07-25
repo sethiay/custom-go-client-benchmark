@@ -1,5 +1,6 @@
 from google.cloud import storage
 import threading
+import multiprocessing
 import time
 
 
@@ -31,23 +32,20 @@ def task(source_blob_name, num_times):
     download_blob(source_blob_name, "/dev/null")
 
 def main():
-  # Spawn threads that will run task of load test.
-  threads = []
-  for thread_num in range(NUM_WORKERS):
-    threads.append(
-        threading.Thread(
-            target=task,
-            args=(OBJECT_NAME_PREFIX.format(thread_num), NUM_TIMES_PER_WORKER)))
-
   startTime = time.time()
-  for thread in threads:
-    # Thread is kept as daemon, so that it is killed when the parent process
-    # is killed.
-    thread.daemon = True
-    thread.start()
+  processes = []
+  for process_id in range(NUM_WORKERS):
+    process = multiprocessing.Process(
+        target=task,
+        args=(OBJECT_NAME_PREFIX.format(process_id), NUM_TIMES_PER_WORKER))
+    processes.append(process)
 
-  for thread in threads:
-    thread.join()
+  for process in processes:
+    process.daemon = True
+    process.start()
+
+  for process in processes:
+    process.join()
 
   print("Time taken: ", time.time() - startTime)
 
