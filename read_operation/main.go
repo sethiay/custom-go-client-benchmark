@@ -104,9 +104,9 @@ func randReadAlreadyOpenedFile(index int) (err error) {
 	pattern := getRandReadPattern()
 	b := make([]byte, *fBlockSizeKB*1024)
 	for i := 0; i < *fNumberOfRead; i++ {
-		readStart := time.Now()
 
 		for j := 0; j < len(pattern); j++ {
+			readStart := time.Now()
 			offset := pattern[j]
 			_, _ = fileHandles[index].Seek(offset, 0)
 
@@ -116,16 +116,16 @@ func randReadAlreadyOpenedFile(index int) (err error) {
 			} else {
 				err = nil
 			}
+			if err != nil {
+				return fmt.Errorf("while reading and discarding content: %v", err)
+			}
+
+			readLatency := time.Since(readStart)
+
+			throughput := float64(len(b)) / readLatency.Seconds()
+			gResult.Append(readLatency.Seconds(), throughput)
 		}
 
-		if err != nil {
-			return fmt.Errorf("while reading and discarding content: %v", err)
-		}
-
-		readLatency := time.Since(readStart)
-
-		throughput := float64(*fFileSizeMB) / readLatency.Seconds()
-		gResult.Append(readLatency.Seconds(), throughput)
 	}
 	return
 }
